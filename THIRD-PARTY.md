@@ -29,7 +29,8 @@ are offered under the LGPL 2.1 (`LICENSES/LGPL-2.1.txt`), not MIT:
 What this means for you (a plain reading, not legal advice): if you ship firmware that contains
 these files, the LGPL asks you to let its users replace them with a modified copy, which in
 practice means publishing these files' source (they are here) together with your firmware's
-object files or source.
+object files or source. The same applies to the WebAssembly build (`wasm/`), which contains them
+too; immanencepure.xyz serves that build and points here for its source.
 
 ## BitMapMathLib: MIT
 

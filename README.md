@@ -164,6 +164,7 @@ src/        the C++ VM (Arduino / PlatformIO library, ESP-IDF component); immane
 host/       the native host runner (make -C host)
 python/     the compiler, the reference interpreter and the `immanence` command
 js/         the compiler in JavaScript (browser and Node)
+wasm/       the VM in WebAssembly (browser and Node): what immanencepure.xyz runs
 examples/   ESP32 projects
 skill/      the sketch-writing skill and prompt
 docs/       documentation

@@ -5,6 +5,7 @@
 // See THIRD-PARTY.md.
 #include "pde_three.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
