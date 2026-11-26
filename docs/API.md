@@ -14,6 +14,8 @@ Base URL: `https://immanencepure.xyz/api/v1`
 | `GET /info/<id>.json` | everything about one piece |
 | `GET /source/<id>.pde` | the raw Processing source (`text/plain; charset=utf-8`) |
 | `GET /bytecode/<id>.pdeb` | the precompiled program for the VM (`application/octet-stream`) |
+| `GET /random` | a randomly chosen piece's info (as `info/<id>.json`); see *A random piece* |
+| `GET /random.pde`, `GET /random.pdeb` | a random piece's source, or its bytecode |
 
 ## `index.json`
 
@@ -26,6 +28,7 @@ Base URL: `https://immanencepure.xyz/api/v1`
   "canvas": {"width": 240, "height": 128},
   "license": ...,
   "docs": "https://github.com/MoonFingerRF/immanence-sketches/blob/main/docs/API.md",
+  "random": "/api/v1/random",
   "count": 2227,
   "pieces": [
     {
@@ -33,7 +36,7 @@ Base URL: `https://immanencepure.xyz/api/v1`
       "title": "megaphone",
       "description": "Shout through a horn and it goes one way only, in a beam you could nearly see.",
       "still": false, "clock": false, "library": true, "p3d": false,
-      "bytecode_bytes": 2825,
+      "bytecode_bytes": 2825, "arena_bytes": 524288,
       "info": "/api/v1/info/megaphone-b3f616.json",
       "source": "/api/v1/source/megaphone-b3f616.pde",
       "bytecode": "/api/v1/bytecode/megaphone-b3f616.pdeb"
@@ -56,12 +59,36 @@ Base URL: `https://immanencepure.xyz/api/v1`
 | `p3d` | `true`: it draws in 3D (`size(240, 128, P3D)`): the VM then needs a 120 KB depth buffer |
 | `bytecode_bytes`, `bytecode_sha256` | size and SHA-256 of the program |
 | `source_bytes`, `source_sha256` | size and SHA-256 of the source |
-| `arena_bytes` | the smallest power-of-two arena measured to draw this piece's first 240 frames exactly (see docs/MEMORY.md) |
+| `arena_bytes` | the smallest power-of-two arena measured to draw this piece's first 240 frames exactly (see docs/MEMORY.md); also in `index.json` |
 | `golden` | `{"frames": n, "crc32": [...]}`: crc32 of the 240 × 128 grey canvas for the first frames (up to 30), so a device can prove it draws the piece exactly; `null` for pieces that read the clock |
 | `info`, `source`, `bytecode` | the URLs of the three files (absolute paths on the site) |
 
 Before running a downloaded program, check byte 4 against your VM's `pde::BC_VERSION` (or
 `index.json`'s `bytecode.version`): a VM refuses programs of another bytecode version.
+
+## A random piece
+
+`GET /random` (or `/random.pde`, `/random.pdeb`) returns a piece chosen at random, in one
+request. The chosen piece's id is in the `X-Piece-Id` response header (exposed to browsers) and
+its permanent URL in `Content-Location`; responses are never cached. Optional filters narrow the
+choice, all of which must hold:
+
+| Parameter | Keeps pieces where |
+|---|---|
+| `still=true\|false` | the piece is a still picture, or animated |
+| `clock=true\|false` | it reads the wall clock, or not |
+| `library=true\|false` | it uses BitMapMathLib, or not |
+| `p3d=true\|false` | it draws in 3D, or not (`p3d=false` on boards without 120 KB for the depth buffer) |
+| `max_arena=<bytes>` | its measured arena fits this size (pick the memory you can give the VM) |
+| `max_bytes=<bytes>` | its bytecode is at most this size |
+| `seed=<text>` | not a filter: the same seed always picks the same piece among the filtered ones (a piece of the day: `seed=2026-11-27`) |
+
+No match gives `404 {"error": ...}`; a malformed filter gives `400`.
+
+```sh
+curl -sD - -o piece.pdeb "https://immanencepure.xyz/api/v1/random.pdeb?p3d=false&max_arena=131072" | grep -i x-piece-id
+immanence fetch random --p3d false --max-arena 131072     # writes <id>.pde, .pdeb and .json
+```
 
 ## Stability (what v1 promises)
 
@@ -102,7 +129,7 @@ print(piece["title"], len(program), "bytes, arena", piece["arena_bytes"])
 ```
 
 Or with the command line tool: `immanence fetch list`, then `immanence fetch <id>` (writes
-`<id>.pde`, `<id>.pdeb` and `<id>.json`).
+`<id>.pde`, `<id>.pdeb` and `<id>.json`), or `immanence fetch random [--p3d false --max-arena N]`.
 
 ### ESP32
 
@@ -127,6 +154,9 @@ if (http.GET() == 200) {
 const api = "https://immanencepure.xyz/api/v1";
 const { pieces } = await (await fetch(`${api}/index.json`)).json();
 const src = await (await fetch(`${api}/source/${pieces[0].id}.pde`)).text();
+
+const r = await fetch(`${api}/random.pde?p3d=false`);      // a random piece, in one request
+console.log(r.headers.get("X-Piece-Id"), await r.text());
 ```
 
 ## Licence

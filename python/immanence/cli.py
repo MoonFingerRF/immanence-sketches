@@ -7,7 +7,8 @@
     immanence run piece.pde [--frames N] [--png out.png | --sheet sheet.png] [--pgm-dir DIR]
                                                       run on the reference interpreter, save frames
     immanence info piece.pdeb                         what a bytecode file holds
-    immanence fetch <id|list> [-o DIR] [--site URL]   a piece from the immanencepure.xyz API
+    immanence fetch <id|random|list> [-o DIR]         a piece from the immanencepure.xyz API
+                    [--p3d false --max-arena N --seed S ...]  (filters for random)
     immanence reference [language|library]            the references a model writes from
 """
 from __future__ import annotations
@@ -216,8 +217,21 @@ def _get(url: str) -> bytes:
         return r.read()
 
 
+def _random_id(base: str, a) -> str:
+    """Ask the site for a random piece (with the filters given) and return its id."""
+    from urllib.parse import urlencode
+    q = {k: v for k, v in (("still", a.still), ("clock", a.clock), ("library", a.library), ("p3d", a.p3d),
+                           ("max_arena", a.max_arena), ("max_bytes", a.max_bytes), ("seed", a.seed)) if v is not None}
+    url = base + "/random" + ("?" + urlencode(q) if q else "")
+    req = urllib.request.Request(url, headers={"User-Agent": "immanence-sketches/1"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.headers.get("X-Piece-Id") or json.loads(r.read())["id"]
+
+
 def cmd_fetch(a) -> int:
     base = a.site.rstrip("/") + "/api/v1"
+    if a.id == "random":
+        a.id = _random_id(base, a)
     if a.id == "list":
         idx = json.loads(_get(base + "/index.json"))
         for p in idx["pieces"]:
@@ -281,9 +295,15 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=cmd_info)
 
     p = sub.add_parser("fetch", help="download a piece from the site API")
-    p.add_argument("id", help="a piece id, or 'list'")
+    p.add_argument("id", help="a piece id, 'random', or 'list'")
     p.add_argument("-o", "--output", default=".")
     p.add_argument("--site", default=SITE)
+    g = p.add_argument_group("filters for 'random'")
+    for k in ("still", "clock", "library", "p3d"):
+        g.add_argument(f"--{k}", choices=["true", "false"])
+    g.add_argument("--max-arena", type=int, metavar="BYTES", help="only pieces that fit this arena")
+    g.add_argument("--max-bytes", type=int, metavar="BYTES", help="only programs up to this size")
+    g.add_argument("--seed", help="the same seed always gives the same piece")
     p.set_defaults(fn=cmd_fetch)
 
     p = sub.add_parser("reference", help="print a reference")

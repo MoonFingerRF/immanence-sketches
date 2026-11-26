@@ -91,10 +91,12 @@ page can use them too:
 | `https://immanencepure.xyz/api/v1/info/<id>.json` | one piece, with its arena size and golden frame hashes |
 | `https://immanencepure.xyz/api/v1/source/<id>.pde` | its Processing source |
 | `https://immanencepure.xyz/api/v1/bytecode/<id>.pdeb` | its precompiled program, ready for the VM |
+| `https://immanencepure.xyz/api/v1/random.pdeb?p3d=false&max_arena=131072` | a random piece (also `random` for its info, `random.pde` for its source), filtered to fit your board |
 
 ```sh
 immanence fetch list                 # every piece: id and title
 immanence fetch <id>                 # writes <id>.pde, <id>.pdeb and <id>.json here
+immanence fetch random --p3d false   # a random piece (filters: --max-arena, --still, --seed ...)
 curl -O https://immanencepure.xyz/api/v1/bytecode/<id>.pdeb
 ```
 
