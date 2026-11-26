@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "immanence-sketches"
+version = "1.0.0"
+description = "Compile Processing sketches to compact bytecode and run them on ESP32 displays"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+immanence = "immanence.cli:main"
+
+[tool.setuptools]
+packages = ["immanence", "immanence.pde"]
+
+[tool.setuptools.package-data]
+immanence = ["*.pde", "*.txt", "*.md"]

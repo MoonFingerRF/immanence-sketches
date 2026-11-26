@@ -1,0 +1,27 @@
+name: test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Build the native host runner
+        run: make -C host
+      - name: Unit tests (compiler, check gate, native VM vs reference, JS vs Python compiler)
+        run: cd python && IMMANENCE_VM=../host/build/immanence-vm python3 -m unittest discover -s tests -v
+      - name: Every skill example passes the check, bit-exact on the native VM
+        run: |
+          export IMMANENCE_VM=$PWD/host/build/immanence-vm PYTHONPATH=$PWD/python
+          for f in skill/sketch-writer/examples/*.pde; do python3 -m immanence check "$f" --frames 30 || exit 1; done
+          python3 host/parity.py skill/sketch-writer/examples/*.pde --frames 30
+      - name: Generated files are current
+        run: |
+          PYTHONPATH=python python3 -m immanence.pde.bcspec | diff - src/pde_spec.h
+          PYTHONPATH=python python3 -m immanence.mathlib json | diff - js/mathlib.json
+          diff skill/sketch-writer/reference/language.md docs/LANGUAGE.md
+          diff skill/sketch-writer/reference/language.md python/immanence/language_reference.md
+          diff skill/sketch-writer/reference/library.md python/immanence/library_reference.md

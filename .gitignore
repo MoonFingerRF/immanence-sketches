@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+python/build/
+host/build/
+.pio/
+build/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+secrets.h
+.DS_Store

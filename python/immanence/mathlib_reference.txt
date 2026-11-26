@@ -1,0 +1,70 @@
+LIBRARY (built in, no import; drawing uses the current stroke and fill; p = how much of a curve is
+drawn, 0..1: p = loopT(200) draws it on):
+NUMBERS AND PLACES
+  PHI (golden ratio)  GOLDEN_ANGLE  E  SQRT2   CX, CY = the centre
+  xAt(a, b) = width * a / b   yAt(a, b) = height * a / b
+  phylloX(i, cx, s)  phylloY(i, cy, s)   seed i of a sunflower spiral, s apart
+TIME AND NOISE
+  ease(t) 0..1 eased   wave(period) 0 to 1 and back every `period` frames   loopT(period) 0 to 1, repeating
+  clockT(seconds) the same over seconds of the clock, gliding within each second
+  timeNoise(x, y, speed)  noise drifting over time (speed 1 / 500 to 1 / 50)
+  flowAngle(x, y, scale, speed) a flow field's angle   cellRandom(i, j, seed) fixed random 0..1
+PLOTS
+  plot(x0, x1, y0, y1)             draws YOUR float fy(float x) across the frame (y0 bottom, y1 top)
+  polarPlot(cx, cy, scale, turns)  draws YOUR float fr(float a) as radius fr(a) * scale
+  polarShape(cx, cy, scale)        the same, closed and filled
+  grid(step)   polarGrid(cx, cy, rmax, rings, spokes)
+CURVES
+  lissajous(cx, cy, rx, ry, a, b, phase, p)   rose(cx, cy, r, k, p)   spiro(cx, cy, R, r, d, p)
+  spaceCurve(kind, x, y, w, h, order, p)   kind: hilbert zorder peano dragon koch gosper
+  LSystem t = new LSystem("F", "F=F[+F]F[-F]F", 25, 4);   axiom, rules, degrees, iterations
+  t.draw(x, y, w, h, p)            fitted into the box; F G draw, f moves, + - turn, [ ] branch
+POINT CLOUDS (build up over frames)
+  Cloud c = new Cloud("fern");   also sierpinski carpet dragon lorenz clifford dejong
+  c.step(n) adds n points (500-3000)   c.draw(kind, scale) inks them in a pattern
+  c.set(a, b, c, d) attractor numbers   c.fit(x, y, w, h)   c.fade(keep) 0..1 of old points stay
+CELLS (drawn in the current fill)
+  Automaton a = new Automaton(30, 3);  rule 0-255, cell size   a.step(); a.draw();
+  Life g = new Life("B3/S23", 3);  g.step(); g.draw(); g.fill(density)   restarts if it dies
+  g.set(i, j, 1)  g.get(i, j)  g.clear()  a.set(i)   fields gap, g.reseed, a.page
+  Fractal f = new Fractal("julia", -4 / 5.0, 1 / 6.0, 1);   julia: c = (a, b); "mandel": centre; zoom
+  f.draw(rows, kind, scale)   the next rows (up to 12), shaded by escape time ("bands": stripes);
+                              f.set(a, b) from the next pass. Never clear
+GEOMETRY
+  voronoi(xs, ys, rings)           cells of the points (float arrays); rings > 1 shades them to the centre
+  delaunay(xs, ys)                 lines between neighbouring points
+  Packing k = new Packing(x, y, w, h, rmin, rmax);  k.step(tries); k.draw(); k.full; k.clear();
+  k.x[i] k.y[i] k.r[i], i < k.n
+  truchet(x, y, w, h, cell, kind, t)   kind arcs diag tri; tiles turn as t grows
+SHADING
+  pattern(kind, scale)             turns every grey pixel so far into the pattern, darker = denser
+  patternRect(kind, scale, x, y, w, h)   the same inside one box (faster)
+  patternShift(dx, dy)             moves the patterns
+  kinds (strings): flat stipple hatch cross lines vlines dots checker weave wavy; scale 3-10
+  shadeField(cell)                 fills the frame from YOUR float shade(float x, float y), 0..1 ink
+  fade(amount)                     washes toward white (30-120) instead of background(): trails
+WORDS
+  textCircle(s, cx, cy, r, start)   textWave(s, x, y, amp, phase)   textFit(s, x, y, w, h)
+  textGrid(s, x, y, w, h, size)    the word repeated over the box
+COST: pattern, shadeField, c.draw, f.draw touch every pixel: two a frame at most.
+
+// a Julia set shaded by escape time
+Fractal f = new Fractal("julia", -4 / 5.0, 1 / 6.0, 1);
+void setup() { size(240, 128); background(255); }
+void draw() { float a = TWO_PI * loopT(2000); f.set(-4 / 5.0 + cos(a) / 20, 1 / 6.0 + sin(a) / 20); f.draw(6, "dots", 4); }
+
+// Voronoi cells hatched by distance
+float[] xs = new float[16];
+float[] ys = new float[16];
+void setup() { size(240, 128); }
+void draw() {
+  background(255);
+  for (int i = 0; i < 16; i++) { xs[i] = width * timeNoise(i, 0, 1 / 256.0); ys[i] = height * timeNoise(i, PHI, 1 / 256.0); }
+  voronoi(xs, ys, 4);
+  pattern("hatch", 5);
+}
+
+// a function plot
+float fy(float x) { return sin(x) * sin(x / 3 + frameCount / 20.0); }
+void setup() { size(240, 128); }
+void draw() { background(255); stroke(190); grid(width / 15); stroke(0); plot(-3 * PI, 3 * PI, -3 / 2.0, 3 / 2.0); }

@@ -1,0 +1,19 @@
+{
+  "name": "immanence-sketches",
+  "version": "1.0.0",
+  "description": "Run Processing sketches, compiled to compact bytecode, on ESP32 displays: a small, safe VM that draws a 240x128 grey canvas bit for bit like the reference compiler.",
+  "keywords": ["processing", "generative-art", "display", "vm", "bytecode", "e-paper", "oled", "tft"],
+  "repository": { "type": "git", "url": "https://github.com/MoonFingerRF/immanence-sketches.git" },
+  "license": "MIT AND LGPL-2.1-only",
+  "frameworks": "*",
+  "platforms": "*",
+  "headers": "immanence.h",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "flags": ["-std=gnu++17", "-ffp-contract=off", "-fno-fast-math"]
+  },
+  "export": {
+    "include": ["src", "examples", "library.json", "library.properties", "LICENSE", "LICENSES", "THIRD-PARTY.md", "README.md"]
+  }
+}

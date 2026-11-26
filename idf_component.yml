@@ -1,0 +1,6 @@
+version: "1.0.0"
+description: Run Processing sketches, compiled to compact bytecode, on ESP32 displays.
+url: https://github.com/MoonFingerRF/immanence-sketches
+license: MIT AND LGPL-2.1-only
+dependencies:
+  idf: ">=5.0"
