@@ -133,13 +133,13 @@ Or with the command line tool: `immanence fetch list`, then `immanence fetch <id
 
 ### ESP32
 
-[`examples/fetch-from-site`](../examples/fetch-from-site) downloads `info/<id>.json` and
-`bytecode/<id>.pdeb` over HTTPS (with the ESP32's certificate bundle), checks the version and the
-arena size, and runs the piece. The essential part:
+[ESP32-RANDOM.md](ESP32-RANDOM.md) is a step-by-step guide to running random pieces on an ESP32,
+with a complete program ([`examples/random-minimal`](../examples/random-minimal));
+[`examples/fetch-from-site`](../examples/fetch-from-site) does the same on a TFT. The essential part:
 
 ```cpp
 HTTPClient http;
-http.begin(client, "https://immanencepure.xyz/api/v1/bytecode/" + id + ".pdeb");
+http.begin(client, "https://immanencepure.xyz/api/v1/random.pdeb?max_arena=1572864");   // or bytecode/<id>.pdeb
 if (http.GET() == 200) {
   int n = http.getSize();
   uint8_t *prog = (uint8_t *) ps_malloc(n);

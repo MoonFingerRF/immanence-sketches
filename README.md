@@ -69,7 +69,8 @@ the canvas onto any size. Complete projects:
 | [`examples/esp-idf-serial`](examples/esp-idf-serial) | any ESP32 | none: the serial console, with a bit-exactness self-test |
 | [`examples/tft-st7789`](examples/tft-st7789) | ESP32-S3 with PSRAM | SPI ST7789 colour TFT |
 | [`examples/oled-ssd1306`](examples/oled-ssd1306) | any ESP32 (no PSRAM) | 128 × 64 I²C SSD1306 OLED |
-| [`examples/fetch-from-site`](examples/fetch-from-site) | ESP32-S3 with PSRAM | downloads pieces from the site API over HTTPS |
+| [`examples/random-minimal`](examples/random-minimal) | any ESP32 | a random piece from the site every 5 minutes, on the serial console ([guide](docs/ESP32-RANDOM.md)) |
+| [`examples/fetch-from-site`](examples/fetch-from-site) | ESP32-S3 with PSRAM | random (or chosen) pieces from the site API over HTTPS, on an ST7789 TFT |
 
 ESP-IDF projects depend on the component from their `main/idf_component.yml`:
 
@@ -100,8 +101,9 @@ immanence fetch random --p3d false   # a random piece (filters: --max-arena, --s
 curl -O https://immanencepure.xyz/api/v1/bytecode/<id>.pdeb
 ```
 
-On an ESP32, [`examples/fetch-from-site`](examples/fetch-from-site) downloads pieces over HTTPS
-and runs them. [docs/API.md](docs/API.md) documents every field, what v1 promises (ids never
+**On an ESP32**: [docs/ESP32-RANDOM.md](docs/ESP32-RANDOM.md) walks through fetching a random piece
+that fits your board and running it, with a complete program; [`examples/fetch-from-site`](examples/fetch-from-site)
+does the same on a TFT. [docs/API.md](docs/API.md) documents every field, what v1 promises (ids never
 change meaning), and has curl, Python, ESP32 and browser examples.
 
 ### Write new sketches with a language model (the skill)
@@ -156,6 +158,7 @@ The full list: [docs/LANGUAGE.md](docs/LANGUAGE.md).
 * [docs/MEMORY.md](docs/MEMORY.md): RAM and PSRAM needs, per-piece arena sizes, frame time
 * [docs/BYTECODE.md](docs/BYTECODE.md): the bytecode format and its version, the VM's safety checks
 * [docs/API.md](docs/API.md): the immanencepure.xyz API
+* [docs/ESP32-RANDOM.md](docs/ESP32-RANDOM.md): random pieces from the site on an ESP32, step by step
 
 ## Repository layout
 

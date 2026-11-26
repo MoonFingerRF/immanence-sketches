@@ -1,25 +1,32 @@
-// immanence-sketches: fetch pieces from immanencepure.xyz and run them (ESP32-S3 with PSRAM).
+// immanence-sketches: fetch pieces from immanencepure.xyz and run them (ESP32-S3, PSRAM advised).
 //
-// For each id in PIECE_IDS the sketch reads the piece's info over HTTPS, checks that this library
-// can run it (bytecode version, size, arena), downloads its bytecode once (kept in PSRAM), and
-// shows it on the ST7789 of examples/tft-st7789, moving to the next id every ROTATE_MS. Without a
-// display (USE_TFT 0) it prints each piece as ASCII art on the serial monitor instead.
+// Random mode (USE_RANDOM true, the default): every ROTATE_MS the sketch asks the site for a random
+// piece that fits this board: `max_arena` is the arena it could allocate, `p3d=false` is added when
+// the heap has no block for the 120 KB P3D depth buffer. Fixed-list mode (USE_RANDOM false): it
+// cycles through PIECE_IDS, downloading each program once and keeping it in memory.
+// Either way it checks the program's header and bytecode version and shows it on the ST7789 of
+// examples/tft-st7789. Without a display (USE_TFT 0) it prints each piece as ASCII art instead.
 //
-// HTTPS is verified with the certificate bundle built into Arduino-ESP32 3.x (the same root
+// HTTPS is verified with the certificate bundle built into Arduino-ESP32 3.x / 4.x (the same root
 // certificates ESP-IDF ships); the sketch never turns verification off.
 //
-// The site API (static JSON, one file per piece):
-//   https://immanencepure.xyz/api/v1/index.json         {"pieces": [{"id": ..., "title": ...}, ...]}
-//   https://immanencepure.xyz/api/v1/info/<id>.json     {"bytecode_bytes": n, "arena_bytes": n,
-//                                                         "bytecode": {"version": 1}, ...}
-//   https://immanencepure.xyz/api/v1/bytecode/<id>.pdeb  the program
+// The site API (https://immanencepure.xyz/api/v1/...):
+//   random.pdeb?<filters>  a random piece's program; its id is in the X-Piece-Id response header,
+//                          404 when no piece matches. Filters: still, clock, library, p3d
+//                          (true|false), max_arena=<bytes>, max_bytes=<bytes>, seed=<text>
+//                          (the same seed gives the same piece).
+//   index.json             {"pieces": [{"id", "title", "arena_bytes", "bytecode_bytes", ...}]}
+//   info/<id>.json         {"title", "bytecode_bytes", "arena_bytes", "p3d", "golden", ...}
+//   bytecode/<id>.pdeb     the program
 //
 // Libraries: immanence-sketches, ArduinoJson 7, Adafruit ST7735 and ST7789 Library, Adafruit GFX.
-// Arduino IDE: board "ESP32S3 Dev Module", PSRAM "OPI PSRAM" (N8R8) or "QSPI PSRAM" (N8R2).
+// Arduino IDE: board "ESP32S3 Dev Module", PSRAM "OPI PSRAM" (N8R8) or "QSPI PSRAM" (N8R2),
+// Flash Size 8MB, Partition Scheme "8M with spiffs".
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <NetworkClientSecure.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
 #include <time.h>
 #include <immanence.h>
 
@@ -30,11 +37,15 @@
 #endif
 
 // ---- which pieces ------------------------------------------------------------------------------
-// `immanence fetch list` (the Python package in this repository) prints real ids and titles.
+#define USE_RANDOM true   // false: cycle through PIECE_IDS instead
+// Extra filters for random mode, e.g. "&still=false" (only animated pieces) or "&clock=false".
+const char *const RANDOM_FILTERS = "";
+// For fixed-list mode. `immanence fetch list` (the Python package in this repository) prints the
+// ids and titles; these three are small 2D pieces that run in a 64 KB arena.
 const char *const PIECE_IDS[] = {
-    "example-id-1",
-    "example-id-2",
-    "example-id-3",
+    "binary-candles-3b8889",   // binary candles
+    "heat-current-aa0047",     // heat current
+    "cooling-slats-3f6132",    // cooling slats
 };
 constexpr int N_IDS = sizeof(PIECE_IDS) / sizeof(PIECE_IDS[0]);
 constexpr uint32_t ROTATE_MS = 5 * 60 * 1000;   // next piece every 5 minutes
@@ -43,6 +54,23 @@ constexpr uint32_t FRAME_MS = 33;               // at most ~30 frames per second
 const char *const API = "https://immanencepure.xyz/api/v1";
 // Your time zone (POSIX TZ string), for pieces that read hour() / minute() / day().
 const char *const TIME_ZONE = "UTC0";           // e.g. "CET-1CEST,M3.5.0,M10.5.0/3"
+
+// ---- memory ------------------------------------------------------------------------------------
+// With PSRAM the arena takes the largest free PSRAM block minus PSRAM_MARGIN (the VM object, its
+// stack, a P3D depth buffer and the downloads may also land in PSRAM), at most 1.5 MB, which runs
+// every piece on the site. Without PSRAM it falls back to a small internal arena.
+constexpr size_t PSRAM_MARGIN = 512 * 1024;
+const size_t INTERNAL_ARENAS[] = {64 * 1024, 48 * 1024, 32 * 1024};
+constexpr size_t PROG_MAX = 16 * 1024;           // largest program accepted (the site's are < 7 KB)
+constexpr size_t DEPTH_BLOCK = 128 * 1024;       // P3D depth buffer (120 KB) plus a little
+
+// A downloaded program. (Declared before the first function: the Arduino IDE puts its generated
+// function prototypes there, and some of them use this type.)
+struct Program {
+  uint8_t *bytes = nullptr;
+  size_t len = 0;
+  String id;
+};
 
 // ---- display: the panel and wiring of examples/tft-st7789 -----------------------------------------
 #define USE_TFT 1   // 0: no display, ASCII art on the serial monitor
@@ -107,24 +135,28 @@ void show(const uint8_t *grey) {   // one character per 2x4 block, at most every
 #endif
 
 // ---- HTTPS -------------------------------------------------------------------------------------
-// The root certificates linked into Arduino-ESP32 3.x (ESP-IDF's bundle).
+// The root certificates linked into Arduino-ESP32 (ESP-IDF's bundle).
 extern const uint8_t x509_crt_bundle_start[] asm("_binary_x509_crt_bundle_start");
 extern const uint8_t x509_crt_bundle_end[] asm("_binary_x509_crt_bundle_end");
 
 NetworkClientSecure tls;
 
-// GET url into a buffer from PSRAM (size bytes at most). Returns the length, or -1.
-int https_get(const String &url, uint8_t *buf, size_t size) {
+// GET url into buf (size bytes at most). Returns the length, -1 on an error, -404 for "not
+// found". When piece_id is given, it receives the X-Piece-Id response header.
+int https_get(const String &url, uint8_t *buf, size_t size, String *piece_id = nullptr) {
   HTTPClient http;
   http.setUserAgent("immanence-sketches/1.0 (fetch-from-site example)");
   http.setTimeout(15000);
   if (!http.begin(tls, url)) return -1;
+  static const char *WANT_HEADERS[] = {"X-Piece-Id"};   // collectHeaders takes const char **
+  if (piece_id) http.collectHeaders(WANT_HEADERS, 1);
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
     Serial.printf("GET %s: %s\n", url.c_str(), code < 0 ? http.errorToString(code).c_str() : String(code).c_str());
     http.end();
-    return -1;
+    return code == HTTP_CODE_NOT_FOUND ? -404 : -1;
   }
+  if (piece_id) *piece_id = http.header("X-Piece-Id");
   int expect = http.getSize();   // -1 when the server does not say
   if (expect > (int) size) {
     Serial.printf("GET %s: %d bytes is too big\n", url.c_str(), expect);
@@ -150,62 +182,112 @@ int https_get(const String &url, uint8_t *buf, size_t size) {
   return (int) got;
 }
 
+// A program starts "PDEB" and its byte 4 is the bytecode version this library must run.
+bool program_ok(const String &id, const uint8_t *p, int n) {
+  if (n < 16 || memcmp(p, "PDEB", 4) != 0) {
+    Serial.printf("%s: not a program\n", id.c_str());
+    return false;
+  }
+  if (p[4] != pde::BC_VERSION) {
+    Serial.printf("%s: bytecode v%d, this library runs v%d: update the library\n", id.c_str(), p[4], pde::BC_VERSION);
+    return false;
+  }
+  return true;
+}
+
 // ---- pieces ------------------------------------------------------------------------------------
-struct Program {
-  uint8_t *bytes = nullptr;   // PSRAM, fetched once
-  size_t len = 0;
-};
-Program programs[N_IDS];
 uint8_t *arena = nullptr;
 size_t arena_bytes = 0;
+bool has_psram = false;
+
+void *big_alloc(size_t n) { return has_psram ? ps_malloc(n) : malloc(n); }
+
+void drop(Program &p) {
+  free(p.bytes);
+  p = Program();
+}
+
+#if USE_RANDOM
+// Random mode: one program at a time; the site picks one that fits this board.
+Program incoming;
+
+bool fetch_next(Program *&out) {
+  if (!incoming.bytes && !(incoming.bytes = (uint8_t *) big_alloc(PROG_MAX))) return false;
+  String url = String(API) + "/random.pdeb?max_arena=" + arena_bytes + "&max_bytes=" + PROG_MAX;
+  // P3D pieces allocate a 120 KB depth buffer from the heap, outside the arena
+  const bool room_for_3d = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= DEPTH_BLOCK;
+  if (!room_for_3d) url += "&p3d=false";
+  url += RANDOM_FILTERS;
+  String id;
+  int n = https_get(url, incoming.bytes, PROG_MAX, &id);
+  if (n == -404) Serial.println("no piece on the site matches the filters");
+  if (n < 0 || !program_ok(id, incoming.bytes, n)) return false;
+  incoming.len = n;
+  incoming.id = id;
+  Serial.printf("%s: %d bytes (random, arena up to %u%s)\n", id.c_str(), n, (unsigned) arena_bytes,
+                room_for_3d ? "" : ", no 3D");
+  out = &incoming;
+  return true;
+}
+#else
+// Fixed-list mode: each program is downloaded once and kept.
+Program programs[N_IDS];
+int next_id = 0;
 uint8_t *scratch = nullptr;   // info JSON
 constexpr size_t SCRATCH = 16 * 1024;
 
-bool fetch_piece(int i) {
-  if (programs[i].bytes) return true;
+bool fetch_id(int i) {
+  Program &p = programs[i];
+  if (p.bytes) return true;
   const String id = PIECE_IDS[i];
+  if (!scratch && !(scratch = (uint8_t *) big_alloc(SCRATCH))) return false;
   int n = https_get(String(API) + "/info/" + id + ".json", scratch, SCRATCH - 1);
   if (n < 0) return false;
   JsonDocument filter, info;
   filter["bytecode_bytes"] = true;
   filter["arena_bytes"] = true;
   filter["title"] = true;
-  filter["bytecode"]["version"] = true;
   if (deserializeJson(info, (const char *) scratch, (size_t) n, DeserializationOption::Filter(filter))) {
     Serial.printf("%s: info is not JSON\n", id.c_str());
     return false;
   }
   const size_t want = info["bytecode_bytes"] | 0;
   const size_t need_arena = info["arena_bytes"] | 0;
-  const int version = info["bytecode"]["version"] | -1;
   const char *title = info["title"] | "";
-  if (version != pde::BC_VERSION) {
-    Serial.printf("%s: bytecode v%d, this library runs v%d: update the library\n", id.c_str(), version, pde::BC_VERSION);
-    return false;
-  }
   if (need_arena > arena_bytes) {
     Serial.printf("%s: needs a %u byte arena, this board has %u\n", id.c_str(), (unsigned) need_arena, (unsigned) arena_bytes);
     return false;
   }
-  if (want == 0 || want > 1024 * 1024) return false;
-  auto *prog = (uint8_t *) ps_malloc(want);
-  if (!prog) return false;
-  n = https_get(String(API) + "/bytecode/" + id + ".pdeb", prog, want);
-  // a program starts "PDEB" and its byte 4 is the bytecode version
-  if (n != (int) want || memcmp(prog, "PDEB", 4) != 0 || prog[4] != pde::BC_VERSION) {
-    Serial.printf("%s: bad bytecode download\n", id.c_str());
-    free(prog);
+  if (want == 0 || want > PROG_MAX) return false;
+  if (!(p.bytes = (uint8_t *) big_alloc(want))) return false;
+  n = https_get(String(API) + "/bytecode/" + id + ".pdeb", p.bytes, want);
+  if (n != (int) want || !program_ok(id, p.bytes, n)) {
+    drop(p);
     return false;
   }
-  programs[i].bytes = prog;
-  programs[i].len = want;
+  p.len = want;
+  p.id = id;
   Serial.printf("%s: \"%s\", %u bytes, arena %u\n", id.c_str(), title, (unsigned) want, (unsigned) need_arena);
   return true;
 }
 
+bool fetch_next(Program *&out) {   // the next id that can be fetched, in turn
+  for (int k = 0; k < N_IDS; k++) {
+    int i = (next_id + k) % N_IDS;
+    if (fetch_id(i)) {
+      next_id = (i + 1) % N_IDS;
+      out = &programs[i];
+      return true;
+    }
+  }
+  return false;
+}
+#endif
+
 pde::Vm *vm = nullptr;
-int current = -1;
-uint32_t shown_at = 0, last_try = 0, last_frame = 0;
+String current;
+uint32_t shown_at = 0, last_frame = 0;
+bool showing = false;
 
 uint32_t now32() { return (uint32_t) millis(); }
 void let_others_run() { delay(1); }
@@ -218,41 +300,61 @@ int32_t utc_offset_s() {   // the local time zone's offset now (DST included)
   return (int32_t) (now - mktime(&g));
 }
 
-bool start(int i) {
-  if (!fetch_piece(i)) return false;
-  delete vm;
+// Fetch the next piece and start it. On failure the current piece stays on screen.
+bool start_next() {
+  Program *p = nullptr;
+  if (!fetch_next(p)) return false;
+  delete vm;   // the old piece stops here
   vm = new pde::Vm(arena, arena_bytes);
   vm->now_ms = now32;
   vm->yield = let_others_run;
+  if (!has_psram) vm->limits.stack_slots = 2048;   // 16 KB instead of 64 KB of internal RAM
   vm->api.now_s = time(nullptr);
   vm->api.tz_s = utc_offset_s();
-  if (!vm->load(programs[i].bytes, programs[i].len)) {
-    Serial.printf("%s: %s\n", PIECE_IDS[i], vm->fault_msg());
-    delete vm;   // the caller tries the other ids (and the current one again)
+  // The VM keeps its own copy of the program, so the download buffer can be reused.
+  if (!vm->load(p->bytes, p->len)) {
+    Serial.printf("%s: %s\n", p->id.c_str(), vm->fault_msg());
+    delete vm;
     vm = nullptr;
-    free(programs[i].bytes);
-    programs[i] = Program();
+    showing = false;
+#if !USE_RANDOM
+    drop(*p);   // fetch it again next time
+#endif
     return false;
   }
-  current = i;
-  shown_at = millis();
+  current = p->id;
+  showing = true;
   return true;
+}
+
+void alloc_arena() {
+  has_psram = psramFound();
+  if (has_psram) {
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    size_t n = largest > PSRAM_MARGIN ? largest - PSRAM_MARGIN : 0;
+    if (n > immanence::DEFAULT_ARENA) n = immanence::DEFAULT_ARENA;
+    n &= ~(size_t) 0xFFFF;   // whole 64 KB steps, like the site's arena sizes
+    if (n >= 64 * 1024 && (arena = (uint8_t *) ps_malloc(n))) {
+      arena_bytes = n;
+      return;
+    }
+  }
+  for (size_t n : INTERNAL_ARENAS)
+    if ((arena = (uint8_t *) malloc(n))) {
+      arena_bytes = n;
+      return;
+    }
 }
 
 void setup() {
   Serial.begin(115200);
   display_begin();
-  static const size_t SIZES[] = {immanence::DEFAULT_ARENA, 1024 * 1024, 512 * 1024};
-  for (size_t n : SIZES)
-    if ((arena = (uint8_t *) ps_malloc(n))) {
-      arena_bytes = n;
-      break;
-    }
-  scratch = (uint8_t *) ps_malloc(SCRATCH);
-  if (!arena || !scratch) {
-    Serial.println("this example needs PSRAM");
+  alloc_arena();
+  if (!arena) {
+    Serial.println("not enough memory for an arena");
     while (true) delay(1000);
   }
+  Serial.printf("arena %u bytes in %s\n", (unsigned) arena_bytes, has_psram ? "PSRAM" : "internal RAM");
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Wi-Fi");
@@ -263,19 +365,15 @@ void setup() {
   Serial.println(" connected");
   configTzTime(TIME_ZONE, "pool.ntp.org", "time.nist.gov");
   tls.setCACertBundle(x509_crt_bundle_start, x509_crt_bundle_end - x509_crt_bundle_start);
+  shown_at = millis() - ROTATE_MS;   // fetch the first piece right away
 }
 
 void loop() {
-  const bool due = current < 0 ? millis() - last_try >= RETRY_MS || last_try == 0 : millis() - shown_at >= ROTATE_MS;
-  if (due) {   // try the next ids in turn; keep the current piece if none can be fetched
-    last_try = millis();
-    for (int k = 1; k <= N_IDS; k++) {
-      int i = ((current < 0 ? -1 : current) + k) % N_IDS;
-      if (start(i)) break;
-    }
-    if (current >= 0 && millis() - shown_at > ROTATE_MS) shown_at = millis() - ROTATE_MS + RETRY_MS;
+  if (millis() - shown_at >= ROTATE_MS) {
+    // a new piece every ROTATE_MS; after a failed fetch, try again in RETRY_MS
+    shown_at = start_next() ? millis() : millis() - ROTATE_MS + RETRY_MS;
   }
-  if (!vm || current < 0 || vm->done() || vm->fault() != pde::Fault::None) {
+  if (!showing || vm->done() || vm->fault() != pde::Fault::None) {   // still, stopped, or none yet
     delay(20);
     return;
   }
@@ -283,5 +381,5 @@ void loop() {
   last_frame = millis();
   vm->api.now_s = time(nullptr);
   if (vm->next_frame()) show(vm->grey());
-  else if (vm->fault() != pde::Fault::None) Serial.printf("%s: stopped: %s\n", PIECE_IDS[current], vm->fault_msg());
+  else if (vm->fault() != pde::Fault::None) Serial.printf("%s: stopped: %s\n", current.c_str(), vm->fault_msg());
 }
