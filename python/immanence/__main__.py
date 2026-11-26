@@ -1,3 +1,3 @@
 import sys
-from .cli import main
-sys.exit(main())
+from .cli import run
+sys.exit(run())

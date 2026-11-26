@@ -12,7 +12,7 @@ license = { text = "MIT" }
 dependencies = []
 
 [project.scripts]
-immanence = "immanence.cli:main"
+immanence = "immanence.cli:run"
 
 [tool.setuptools]
 packages = ["immanence", "immanence.pde"]

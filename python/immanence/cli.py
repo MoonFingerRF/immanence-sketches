@@ -294,5 +294,14 @@ def main(argv: list[str] | None = None) -> int:
     return a.fn(a)
 
 
+def run() -> int:
+    """The console entry point: main(), quiet when its output pipe closes early (`| head`)."""
+    try:
+        return main()
+    except BrokenPipeError:
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())
